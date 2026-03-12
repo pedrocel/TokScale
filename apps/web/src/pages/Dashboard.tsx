@@ -19,10 +19,17 @@ export default function Dashboard() {
 
   const fetchAccounts = async () => {
     try {
-      const response = await fetch('http://localhost:8787/api/accounts')
+      const token = localStorage.getItem('tokscale_token')
+      const response = await fetch('http://localhost:8787/api/accounts', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
       if (response.ok) {
         const data = await response.json()
         setAccounts(data)
+      } else if (response.status === 401) {
+        navigate('/login')
       }
     } catch (err) {
       console.error('Erro ao buscar contas:', err)
@@ -81,6 +88,13 @@ export default function Dashboard() {
                   <div className="ad-account-status">
                     <span className={`status-dot status-${acc.status?.toLowerCase()}`}></span>
                     {acc.status}
+                  </div>
+                  <div className="ad-account-footer">
+                    <span className="pixel-count">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                      {acc.pixel_count || 0} Pixels
+                    </span>
+                    <button className="btn-text">Ver Pixels</button>
                   </div>
                 </div>
               ))}
@@ -176,6 +190,34 @@ export default function Dashboard() {
         }
         .status-active { background-color: #10b981; }
         .status-disabled { background-color: #ef4444; }
+        
+        .ad-account-footer {
+          margin-top: 1rem;
+          padding-top: 0.75rem;
+          border-top: 1px solid #f3f4f6;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .pixel-count {
+          display: flex;
+          align-items: center;
+          gap: 0.25rem;
+          font-size: 0.75rem;
+          color: #6b7280;
+        }
+        .btn-text {
+          background: none;
+          border: none;
+          color: #ff0050;
+          font-size: 0.75rem;
+          font-weight: 600;
+          cursor: pointer;
+          padding: 0;
+        }
+        .btn-text:hover {
+          text-decoration: underline;
+        }
         
         .btn {
           padding: 0.75rem 1.5rem;

@@ -21,8 +21,16 @@ export default function MassPublish() {
   const [budget, setBudget] = useState('50.00')
 
   useState(() => {
-    fetch('http://localhost:8787/api/accounts')
-      .then(res => res.json())
+    const token = localStorage.getItem('tokscale_token')
+    fetch('http://localhost:8787/api/accounts', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then(res => {
+        if (res.status === 401) navigate('/login')
+        return res.json()
+      })
       .then(data => {
         setAccounts(data)
         setIsLoading(false)
@@ -42,9 +50,13 @@ export default function MassPublish() {
 
     setIsSubmitting(true)
     try {
+      const token = localStorage.getItem('tokscale_token')
       const response = await fetch('http://localhost:8787/api/jobs/publish', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           accounts: selectedAccounts,
           campaign: {
@@ -56,8 +68,8 @@ export default function MassPublish() {
       })
 
       if (response.ok) {
-        alert('Job de publicação criado com sucesso!')
-        navigate('/dashboard')
+        const data = await response.json()
+        navigate(`/jobs/${data.job_id}`)
       }
     } catch (err) {
       alert('Erro ao criar job')

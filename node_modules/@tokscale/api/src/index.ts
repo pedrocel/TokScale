@@ -1,9 +1,21 @@
+/// <reference types="@cloudflare/workers-types" />
+import { SignJWT, jwtVerify } from 'jose';
+
 export interface Env {
   DB: D1Database;
   TIKTOK_APP_ID: string;
   TIKTOK_SECRET: string;
   TIKTOK_REDIRECT_URI: string;
   PUBLISH_QUEUE: Queue<any>;
+  JWT_SECRET: string;
+}
+
+// Auxiliar para hashing de senha (Web Crypto)
+async function hashPassword(password: string) {
+  const msgUint8 = new TextEncoder().encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 export default {
@@ -21,6 +33,19 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
+    // Middleware de Auth (opcional para certas rotas)
+    const getAuthUser = async () => {
+      const authHeader = request.headers.get("Authorization");
+      if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+      const token = authHeader.split(" ")[1];
+      try {
+        const { payload } = await jwtVerify(token, new TextEncoder().encode(env.JWT_SECRET));
+        return payload as { id: string, email: string };
+      } catch (e) {
+        return null;
+      }
+    };
+
     // Roteamento básico
     if (url.pathname === "/api/health") {
       return new Response(JSON.stringify({ status: "ok", database: !!env.DB, queue: !!env.PUBLISH_QUEUE }), {
@@ -28,14 +53,44 @@ export default {
       });
     }
 
-    // Auth Mock (Login)
+    // Auth Real (Login)
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
-      const { email, password } = await request.json() as any;
-      // TODO: Implementar autenticação real com D1 e JWT
-      return new Response(JSON.stringify({ 
-        token: "mock-jwt-token", 
-        user: { email, id: "user_123" } 
-      }), {
+      const { email, password } = await request.json() as { email?: string, password?: string };
+      
+      if (!email || !password) {
+        return new Response(JSON.stringify({ error: "Email e senha são obrigatórios" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const passwordHash = await hashPassword(password);
+      
+      let user = await env.DB.prepare("SELECT * FROM users WHERE email = ?").bind(email).first() as any;
+      
+      if (!user) {
+        // Registro automático no MVP para facilitar testes
+        const userId = crypto.randomUUID();
+        const workspaceId = crypto.randomUUID();
+        
+        await env.DB.prepare("INSERT INTO workspaces (id, name) VALUES (?, ?)").bind(workspaceId, `${email}'s Workspace`).run();
+        await env.DB.prepare("INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)").bind(userId, email, passwordHash).run();
+        await env.DB.prepare("INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, 'admin')").bind(workspaceId, userId).run();
+        
+        user = { id: userId, email, password_hash: passwordHash };
+      } else if (user.password_hash !== passwordHash) {
+        return new Response(JSON.stringify({ error: "Senha incorreta" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const token = await new SignJWT({ id: user.id, email: user.email })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setExpirationTime('24h')
+        .sign(new TextEncoder().encode(env.JWT_SECRET));
+
+      return new Response(JSON.stringify({ token, user: { id: user.id, email: user.email } }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -100,6 +155,7 @@ export default {
             
             if (accountsData.code === 0 && accountsData.data?.list) {
               for (const acc of accountsData.data.list) {
+                const acc_id = crypto.randomUUID();
                 await env.DB.prepare(`
                   INSERT INTO ad_accounts (id, workspace_id, connection_id, external_account_id, name, status, last_synced_at)
                   VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -108,13 +164,42 @@ export default {
                     status = excluded.status, 
                     last_synced_at = CURRENT_TIMESTAMP
                 `).bind(
-                  crypto.randomUUID(),
+                  acc_id,
                   workspace_id,
                   connection_id,
                   acc.advertiser_id,
                   acc.advertiser_name,
                   acc.status
                 ).run();
+
+                // Sincronizar Pixels para esta conta
+                try {
+                  const pixelsResponse = await fetch(`https://business-api.tiktok.com/open_api/v1.3/pixel/get/?advertiser_id=${acc.advertiser_id}`, {
+                    headers: { "Access-Token": access_token }
+                  });
+                  const pixelsData = await pixelsResponse.json() as any;
+
+                  if (pixelsData.code === 0 && pixelsData.data?.list) {
+                    for (const pixel of pixelsData.data.list) {
+                      await env.DB.prepare(`
+                        INSERT INTO tiktok_pixels (id, ad_account_id, external_pixel_id, name, status, last_synced_at)
+                        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(id) DO UPDATE SET 
+                          name = excluded.name, 
+                          status = excluded.status, 
+                          last_synced_at = CURRENT_TIMESTAMP
+                      `).bind(
+                        crypto.randomUUID(),
+                        acc_id,
+                        pixel.pixel_id,
+                        pixel.pixel_name,
+                        pixel.status
+                      ).run();
+                    }
+                  }
+                } catch (pe) {
+                  console.error(`Erro ao sincronizar pixels para conta ${acc.advertiser_id}:`, pe);
+                }
               }
             }
           } catch (e) {
@@ -130,8 +215,30 @@ export default {
 
     // Listar contas de anúncio
     if (url.pathname === "/api/accounts" && request.method === "GET") {
-      const workspace_id = "ws_123"; // Mock
-      const { results } = await env.DB.prepare("SELECT * FROM ad_accounts WHERE workspace_id = ?").bind(workspace_id).all();
+      const user = await getAuthUser();
+      if (!user) {
+        return new Response(JSON.stringify({ error: "Não autorizado" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const workspace_id = "ws_123"; // TODO: Buscar workspace real
+      const { results } = await env.DB.prepare(`
+        SELECT a.*, (SELECT COUNT(*) FROM tiktok_pixels WHERE ad_account_id = a.id) as pixel_count
+        FROM ad_accounts a 
+        WHERE a.workspace_id = ?
+      `).bind(workspace_id).all();
+      return new Response(JSON.stringify(results), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Listar Pixels por Conta
+    const pixelMatch = url.pathname.match(/\/api\/accounts\/([^\/]+)\/pixels/);
+    if (pixelMatch && request.method === "GET") {
+      const ad_account_id = pixelMatch[1];
+      const { results } = await env.DB.prepare("SELECT * FROM tiktok_pixels WHERE ad_account_id = ?").bind(ad_account_id).all();
       return new Response(JSON.stringify(results), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -139,8 +246,16 @@ export default {
 
     // Criar Job de Publicação
     if (url.pathname === "/api/jobs/publish" && request.method === "POST") {
-      const { accounts, campaign } = await request.json() as any;
-      const workspace_id = "ws_123"; // Mock
+      const user = await getAuthUser();
+      if (!user) {
+        return new Response(JSON.stringify({ error: "Não autorizado" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { accounts, campaign } = await request.json() as { accounts: string[], campaign: any };
+      const workspace_id = "ws_123"; // TODO: Buscar workspace real do usuário
       const job_id = crypto.randomUUID();
 
       // 1. Criar o Job no D1

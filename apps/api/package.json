@@ -5,11 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev src/index.ts",
-    "deploy": "wrangler deploy src/index.ts"
+    "deploy": "wrangler deploy src/index.ts",
+    "lint": "eslint ."
   },
   "devDependencies": {
-    "wrangler": "^3.111.0",
+    "@cloudflare/workers-types": "^4.20250224.0",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.0.3",
+    "globals": "^17.4.0",
     "typescript": "^5.9.3",
-    "@cloudflare/workers-types": "^4.20250224.0"
+    "typescript-eslint": "^8.57.0",
+    "wrangler": "^3.111.0"
+  },
+  "dependencies": {
+    "jose": "^6.2.1"
   }
 }

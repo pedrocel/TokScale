@@ -77,6 +77,28 @@ a {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.nav a:hover {
+  color: #ff0050;
+}
+
+.btn-logout {
+  background: none;
+  border: 1px solid #ddd;
+  color: #666;
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  margin-left: 1rem;
+  transition: all 0.2s;
+}
+
+.btn-logout:hover {
+  background-color: #f5f5f5;
+  color: #333;
+  border-color: #ccc;
+}
+
 .main {
   flex: 1;
 }

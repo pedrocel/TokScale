@@ -65,3 +65,14 @@ CREATE TABLE IF NOT EXISTS publish_job_items (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     finished_at DATETIME
 );
+
+-- TikTok Pixels
+CREATE TABLE IF NOT EXISTS tiktok_pixels (
+    id TEXT PRIMARY KEY,
+    ad_account_id TEXT REFERENCES ad_accounts(id),
+    external_pixel_id TEXT NOT NULL,
+    name TEXT,
+    status TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_synced_at DATETIME
+);
