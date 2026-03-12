@@ -1,0 +1,11 @@
+name = "tokscale-api"
+main = "src/index.ts"
+compatibility_date = "2025-02-24"
+
+# [vars]
+# API_SECRET = "example"
+
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "tokscale-db"
+# database_id = "..."

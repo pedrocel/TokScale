@@ -1,0 +1,13 @@
+{
+  "name": "tokscale",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "web:dev": "npm run dev --workspace=apps/web",
+    "web:build": "npm run build --workspace=apps/web",
+    "api:dev": "npm run dev --workspace=apps/api",
+    "api:deploy": "npm run deploy --workspace=apps/api"
+  }
+}
