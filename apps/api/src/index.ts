@@ -48,51 +48,78 @@ export default {
 
     // Roteamento básico
     if (url.pathname === "/api/health") {
-      return new Response(JSON.stringify({ status: "ok", database: !!env.DB, queue: !!env.PUBLISH_QUEUE }), {
+      return new Response(JSON.stringify({ 
+        status: "ok", 
+        database: !!env.DB, 
+        queue: !!env.PUBLISH_QUEUE,
+        time: new Date().toISOString()
+      }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     // Auth Real (Login)
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
-      const { email, password } = await request.json() as { email?: string, password?: string };
-      
-      if (!email || !password) {
-        return new Response(JSON.stringify({ error: "Email e senha são obrigatórios" }), {
-          status: 400,
+      try {
+        console.log("[LOGIN] Request received");
+        const { email, password } = await request.json() as { email?: string, password?: string };
+        console.log(`[LOGIN] Attempting login for: ${email}`);
+        
+        if (!email || !password) {
+          console.error("[LOGIN] Error: Email or password missing");
+          return new Response(JSON.stringify({ error: "Email e senha são obrigatórios" }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        console.log("[LOGIN] Hashing password...");
+        const passwordHash = await hashPassword(password);
+        console.log("[LOGIN] Password hashed. Querying database...");
+        
+        let user = await env.DB.prepare("SELECT * FROM users WHERE email = ?").bind(email).first() as any;
+        
+        if (!user) {
+          console.log(`[LOGIN] User not found. Creating new user for ${email}...`);
+          const userId = crypto.randomUUID();
+          const workspaceId = crypto.randomUUID();
+          
+          console.log("[LOGIN] Creating workspace...");
+          await env.DB.prepare("INSERT INTO workspaces (id, name) VALUES (?, ?)").bind(workspaceId, `${email}'s Workspace`).run();
+          
+          console.log("[LOGIN] Creating user...");
+          await env.DB.prepare("INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)").bind(userId, email, passwordHash).run();
+
+          console.log("[LOGIN] Creating workspace member...");
+          await env.DB.prepare("INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, 'admin')").bind(workspaceId, userId).run();
+          
+          user = { id: userId, email, password_hash: passwordHash };
+          console.log(`[LOGIN] New user created with ID: ${userId}`);
+        } else if (user.password_hash !== passwordHash) {
+          console.warn(`[LOGIN] Incorrect password for user ${email}`);
+          return new Response(JSON.stringify({ error: "Senha incorreta" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        console.log(`[LOGIN] User authenticated: ${user.email}. Creating JWT...`);
+        const token = await new SignJWT({ id: user.id, email: user.email })
+          .setProtectedHeader({ alg: 'HS256' })
+          .setExpirationTime('24h')
+          .sign(new TextEncoder().encode(env.JWT_SECRET));
+        console.log("[LOGIN] JWT created. Sending response.");
+
+        return new Response(JSON.stringify({ token, user: { id: user.id, email: user.email } }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      } catch (err: any) {
+        console.error("[LOGIN] CRITICAL ERROR:", err);
+        return new Response(JSON.stringify({ error: "Erro interno no servidor de login.", message: err.message }), {
+          status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-
-      const passwordHash = await hashPassword(password);
-      
-      let user = await env.DB.prepare("SELECT * FROM users WHERE email = ?").bind(email).first() as any;
-      
-      if (!user) {
-        // Registro automático no MVP para facilitar testes
-        const userId = crypto.randomUUID();
-        const workspaceId = crypto.randomUUID();
-        
-        await env.DB.prepare("INSERT INTO workspaces (id, name) VALUES (?, ?)").bind(workspaceId, `${email}'s Workspace`).run();
-        await env.DB.prepare("INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)").bind(userId, email, passwordHash).run();
-        await env.DB.prepare("INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, 'admin')").bind(workspaceId, userId).run();
-        
-        user = { id: userId, email, password_hash: passwordHash };
-      } else if (user.password_hash !== passwordHash) {
-        return new Response(JSON.stringify({ error: "Senha incorreta" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const token = await new SignJWT({ id: user.id, email: user.email })
-        .setProtectedHeader({ alg: 'HS256' })
-        .setExpirationTime('24h')
-        .sign(new TextEncoder().encode(env.JWT_SECRET));
-
-      return new Response(JSON.stringify({ token, user: { id: user.id, email: user.email } }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
     }
 
     // TikTok OAuth - Start

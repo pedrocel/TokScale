@@ -47,7 +47,8 @@ export default function Login() {
       localStorage.setItem('tokscale_user', JSON.stringify(data.user))
 
       setStatus('success')
-      navigate('/')
+      // Redireciona para o dashboard após o sucesso
+      navigate('/dashboard')
     } catch (err) {
       setError('Credenciais inválidas ou erro no servidor.')
       setStatus('idle')

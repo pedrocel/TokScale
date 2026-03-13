@@ -5,7 +5,7 @@ compatibility_date = "2025-02-24"
 # [vars]
 # API_SECRET = "example"
 
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "tokscale-db"
-# database_id = "..."
+[[d1_databases]]
+binding = "DB"
+database_name = "tokscale-db"
+database_id = "local-db-id" # Pode ser qualquer ID para o local
